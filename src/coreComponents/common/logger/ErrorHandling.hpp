@@ -61,7 +61,9 @@ public:
     {
       InputFile,
       InputLine,
-      DataPath
+      DataPath,
+      DetectionLoc,
+      Signal,
     };
 
     /// The map contains contextual information about the error
@@ -72,6 +74,12 @@ public:
     /// "dataPath" = "/Functions/co2brine_philipsDensityTable
     /// The key is a field of the Attribute enumeration and is converted to a string for writing in the YAML
     map< Attribute, std::string > m_attributes;
+
+    /**
+     * @brief Priority level assigned to an error context.
+     * @details Used to prioritize contextes (higher values = more relevant). Default is 0.
+     *
+     */
     integer m_priority = 0;
 
     /**
@@ -113,9 +121,10 @@ public:
     std::vector< std::string > m_sourceCallStack;
 
     /**
-     * @brief Construct a default Error Message without field specification
+     * @brief Construct a default Error Message
      */
-    ErrorMsg() {};
+    ErrorMsg()
+    {}
 
     /**
      * @brief Construct a new Error Message from parameters
@@ -129,63 +138,73 @@ public:
 
     /**
      * @brief Add text to the current error msg
-     * @param e the exception containing text to add
-     * @param toEnd indicates whether to add the message at the beginning (true) or at the end (false)
+     * @param e The exception containing text to add
+     * @param toEnd Indicates whether to add the message at the beginning (true) or at the end (false)
      *              default is false
-     * @return the reference to the current instance
+     * @return Reference to the current instance for method chaining.
      */
     ErrorMsg & addToMsg( std::exception const & e, bool toEnd = false );
 
     /**
      * @brief Add text to the current error msg
-     * @param msg the text to add
-     * @param toEnd indicates whether to add the message at the beginning (true) or at the end (false)
+     * @param msg The text to add
+     * @param toEnd Indicates whether to add the message at the beginning (true) or at the end (false)
      *              default is false
-     * @return the reference to the current instance
+     * @return Reference to the current instance for method chaining.
      */
     ErrorMsg & addToMsg( std::string_view msg, bool toEnd = false );
 
     /**
+     * @brief Add text to the error msg that occured according to the specified signal.
+     *        - the signal can be one of the main error signals.
+     *        - if the signal is SIGFPE, the nature of floating point error will be interpreted.
+     * @param signal The signal, from ISO C99 or POSIX standard.
+     * @param toEnd adds the message to the end if true, at the start otherwise.
+     * @return The instance, for builder pattern.
+     */
+    ErrorMsg & addSignalToMsg( int signal, bool toEnd = false );
+
+    /**
      * @brief Set the source code location values (file and line where the error is detected)
-     * @param msgFile name of the source file location to add
-     * @param msgLine line of the source file location to add
-     * @return the reference to the current instance
+     * @param msgFile Name of the source file location to add
+     * @param msgLine Line of the source file location to add
+     * @return Reference to the current instance for method chaining.
      */
     ErrorMsg & setCodeLocation( std::string_view msgFile, integer msgLine );
 
     /**
      * @brief Set the type of the error
-     * @param msgType the type can be error, warning or exception
-     * @return the reference to the current instance
+     * @param msgType The type can be error, warning or exception
+     * @return Reference to the current instance for method chaining.
      */
     ErrorMsg & setType( MsgType msgType );
 
     /**
      * @brief Set the cause of the error
      * @param cause See documentation of m_cause.
-     * @return The reference to the current instance
+     * @return Reference to the current instance for method chaining.
      */
     ErrorMsg & setCause( std::string_view cause );
 
     /**
      * @brief Set the rank on which the error is raised
-     * @param rank the value to asign
-     * @return the reference to the current instance
+     * @param rank The value to asign
+     * @return Reference to the current instance for method chaining.
      */
     ErrorMsg & setRank( int rank );
 
     /**
      * @brief Add stack trace information about the error
      * @param ossStackTrace stack trace information to add
-     * @return the reference to the current instance
+     * @return Reference to the current instance for method chaining.
      */
     ErrorMsg & addCallStackInfo( std::string_view ossStackTrace );
 
     /**
      * @brief Adds one or more context elements to the error
-     * @tparam Args variadic pack of argument types
-     * @param args list of DataContexts
-     * @return the reference to the current instance
+     * @tparam Args Variadic pack of compatible types (ErrorContext / DataContext)
+     * @param args List of context data structures.
+     * @return Reference to the current instance for method chaining.
      */
     template< typename ... Args >
     ErrorMsg & addContextInfo( Args && ... args );
@@ -205,6 +224,15 @@ private:
 
     bool m_isValidStackTrace = false;
   };
+
+  /**
+   * @return Global instance of the ErrorLogger class used for error/warning reporting.
+   * @details This global instance is used across the codebase to log errors, warnings, and exceptions,
+   *          and to write structured output of errors. It is used through the logging macros.
+   * @note - local instances are possible for more specialized logging.
+   *       - currently not available on GPU, use GEOS_WARNING/ERROR/ASSERT macros for this usecase.
+   */
+  GEOS_HOST static ErrorLogger & global();
 
   /**
    * @return true if the YAML file output is enabled
@@ -237,7 +265,7 @@ private:
    * @brief Gives acces to the error message that is currently being constructed,
    *        potencially at various application layers
    *        Use flushErrorMsg() when the message is fully constructed and you want it to be output
-   * @return the reference to the current instance
+   * @return Reference to the current instance for method chaining.
    */
   ErrorMsg & currentErrorMsg()
   { return m_currentErrorMsg; }
@@ -279,7 +307,7 @@ private:
                                      std::string_view indent );
 };
 
-extern ErrorLogger g_errorLogger;
+/// @cond DO_NOT_DOCUMENT
 
 template< typename ... Args >
 ErrorLogger::ErrorMsg & ErrorLogger::ErrorMsg::addContextInfo( Args && ... args )
@@ -287,6 +315,8 @@ ErrorLogger::ErrorMsg & ErrorLogger::ErrorMsg::addContextInfo( Args && ... args 
   ( this->addContextInfoImpl( ErrorContext( args ) ), ... );
   return *this;
 }
+
+/// @endcond
 
 } /* namespace geos */
 

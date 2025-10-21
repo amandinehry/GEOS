@@ -22,18 +22,27 @@
 #include "common/format/StringUtilities.hpp"
 
 #include <fstream>
+#include <regex>
 #include <string_view>
+
+// signal management
+#include <csignal>
+#include <cfenv>
+#include <cstring>
 
 namespace geos
 {
 static constexpr std::string_view g_level1Start = "  - ";
 static constexpr std::string_view g_level1Next =  "    ";
-static constexpr std::string_view g_level2Start = "    - ";
+// static constexpr std::string_view g_level2Start = "    - "; // unused for now
 static constexpr std::string_view g_level2Next =  "      ";
 static constexpr std::string_view g_level3Start = "      - ";
 static constexpr std::string_view g_level3Next =  "        ";
 
 ErrorLogger g_errorLogger{};
+
+ErrorLogger & ErrorLogger::global()
+{ return g_errorLogger; }
 
 void ErrorLogger::createFile()
 {
@@ -64,7 +73,9 @@ std::string ErrorLogger::ErrorContext::attributeToString( ErrorLogger::ErrorCont
     case ErrorLogger::ErrorContext::Attribute::InputFile: return "inputFile";
     case ErrorLogger::ErrorContext::Attribute::InputLine: return "inputLine";
     case ErrorLogger::ErrorContext::Attribute::DataPath: return "dataPath";
-    default: return "Unknown";
+    case ErrorLogger::ErrorContext::Attribute::DetectionLoc: return "detectionLocation";
+    case ErrorLogger::ErrorContext::Attribute::Signal: return "signal";
+    default: return "unknown";
   }
 }
 
@@ -92,6 +103,39 @@ ErrorLogger::ErrorMsg & ErrorLogger::ErrorMsg::addToMsg( std::string_view errorM
     m_msg = std::string( errorMsg ) + m_msg;
   }
   return *this;
+}
+
+ErrorLogger::ErrorMsg & ErrorLogger::ErrorMsg::addSignalToMsg( int sig, bool toEnd )
+{
+  if( sig == SIGFPE )
+  {
+    std::string errorMsg = "Floating point error encountered: \n";
+
+    if( std::fetestexcept( FE_DIVBYZERO ) )
+      errorMsg += "- Division by zero operation.\n";
+
+    if( std::fetestexcept( FE_INEXACT ) )
+      errorMsg += "- Inexact result.\n";
+
+    if( std::fetestexcept( FE_INVALID ) )
+      errorMsg += "- Domain error occurred in an earlier floating-point operation.\n";
+
+    if( std::fetestexcept( FE_OVERFLOW ) )
+      errorMsg += "- The result of the earlier floating-point operation was too large to be representable.\n";
+
+    if( std::fetestexcept( FE_UNDERFLOW ) )
+      errorMsg += "- The result of the earlier floating-point operation was subnormal with a loss of precision.\n";
+
+    return addToMsg( errorMsg,
+                     toEnd );
+  }
+  else
+  {
+    // standard messages
+    return addToMsg( GEOS_FMT( "Signal no. {} encountered: {}\n",
+                               sig, ::strsignal( sig ) ),
+                     toEnd );
+  }
 }
 
 ErrorLogger::ErrorMsg & ErrorLogger::ErrorMsg::setCodeLocation( std::string_view msgFile, integer msgLine )
@@ -230,10 +274,12 @@ void ErrorLogger::flushErrorMsg( ErrorLogger::ErrorMsg & errorMsg )
     }
 
     // Location of the error in the code
-    yamlFile << g_level1Next << "sourceLocation:\n";
-    yamlFile << g_level2Next << "file: " << errorMsg.m_file << "\n";
-    yamlFile << g_level2Next << "line: " << errorMsg.m_line << "\n";
-
+    if( !errorMsg.m_file.empty() )
+    {
+      yamlFile << g_level1Next << "sourceLocation:\n";
+      yamlFile << g_level2Next << "file: " << errorMsg.m_file << "\n";
+      yamlFile << g_level2Next << "line: " << errorMsg.m_line << "\n";
+    }
     // Information about the stack trace
     if( !errorMsg.m_sourceCallStack.empty() )
     {
@@ -249,12 +295,12 @@ void ErrorLogger::flushErrorMsg( ErrorLogger::ErrorMsg & errorMsg )
     yamlFile << "\n";
     yamlFile.flush();
     errorMsg = ErrorMsg();
-    GEOS_LOG_RANK( GEOS_FMT( "The error file {} was appended.", m_filename ) );
+    GEOS_LOG_RANK( GEOS_FMT( "The error file {} has been appended.\n", m_filename ) );
   }
   else
   {
     GEOS_LOG_RANK( GEOS_FMT( "Unable to open error file for writing.\n- Error file: {}\n- Error file enabled = {}.\n",
-                             m_filename, g_errorLogger.isOutputFileEnabled() ) );
+                             m_filename, isOutputFileEnabled() ) );
   }
 }
 
